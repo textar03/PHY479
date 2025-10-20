@@ -23,11 +23,7 @@ class TightBindingModel:
     """
     
     def __init__(self, lattice_vec, lattice_orb):
-        """
-        lattice_vec : (d, d) array
-            Each row is a real-space primitive vector a1, a2, ...
-        lattice_orb : list of orbital positions (fractional coordinates)
-        """
+        
         self.lattice_vec = np.array(lattice_vec, dtype=float)
         self.reciprocal_lattice_vec = 2 * np.pi * np.linalg.inv(self.lattice_vec).T
         self.lattice_orb = np.array(lattice_orb, dtype=float)
@@ -78,32 +74,104 @@ class TightBindingModel:
         return H_ij
 
     def H_energies(self, k_val):
-        """
-        Compute eigenvalues of H(k)
-        """
+        
         Hk = self.H_k(k_val)
         eigs = np.linalg.eigvalsh(Hk)
         return np.real_if_close(eigs)
     
     
-    '''
-    The N1, N2, N3 parameters are the number of grid points you would like to input. By using ratios of the reciprocal lattice vectors we can then create a momentum
-    space grid. 
-    '''
-    def define_k_spacegrid(self, N1, N2, N3):
-        k_list = []
-        for n1 in range(N1):
-            for n2 in range(N2):
-                for n3 in range(N3):
-                    k_point = np.dot([(n1/N1), (n2/N2), (n3/N3)], self.reciprocal_lattice_vec)
-                    k_list.append(k_point)
-        return np.array(k_list)
+    def high_symmetry_path(self, high_symmetry_points, path_values, Nk):
+        
+        k_list, tick_positions = [] , [0]
+        for i in range(len(path_values) - 1):
+            k_start = np.array(high_symmetry_points[path_values[i]])
+            k_end = np.array(high_symmetry_points[path_values[i + 1]])
+            segment = [
+                k_start + (k_end - k_start) * t
+                for t in np.linspace(0, 1, Nk, endpoint=False)
+            ]
+            k_list.extend(segment)
+            tick_positions.append(len(k_list))
+        return np.array(k_list), tick_positions
+
+
+    def plot_bandstructure(self, sym_points, path_val, Nk_per_segment):
+       
+        klist, ticks = self.high_symmetry_path(sym_points, path_val, Nk_per_segment)
+
+        energies = np.array([self.H_energies(k) for k in klist])
+
+        plt.figure(figsize=(6,4))
+        for n in range(energies.shape[1]):
+            plt.plot(energies[:,n], 'k-', lw=1)
+        for t in ticks:
+            plt.axvline(t, color='gray', lw=0.5)
+        plt.xticks(ticks, path_val)
+        plt.ylabel("Energy (t units)")
+        plt.title("Band structure")
+        plt.tight_layout()
+        plt.show()
+        
+        
+        
+#-------------------------------------- Open Boundary Conditions ----------------------------------------- #
+
+def build_realspace_H(self, Ncells):
     
-    def plot_band_structure(self, k_list):
-        return 0
+        ndim = len(Ncells)
+        norb = self.norbs
+        total_cells = np.prod(Ncells)
+        Ntot = total_cells * norb
+        H = np.zeros((Ntot, Ntot), dtype=complex)
 
+        # --- Loop over all real-space cells ---
+        if ndim == 1:
+            Nx = Ncells[0]
+            for x in range(Nx):
+                for (i, j, R), T in self.hopping_element.items():
+                    tx = x + R[0]
+                    if 0 <= tx < Nx:
+                        a = (x * norb) + i
+                        b = (tx * norb) + j
+                        H[a, b] += T
 
-# --- Once TightBinding class is already defined ---
+        elif ndim == 2:
+            Nx, Ny = Ncells
+            for x in range(Nx):
+                for y in range(Ny):
+                    for (i, j, R), T in self.hopping_element.items():
+                        tx, ty = x + R[0], y + R[1]
+                        if 0 <= tx < Nx and 0 <= ty < Ny:
+                            a = (x * Ny + y) * norb + i
+                            b = (tx * Ny + ty) * norb + j
+                            H[a, b] += T
+
+        elif ndim == 3:
+            Nx, Ny, Nz = Ncells
+            for x in range(Nx):
+                for y in range(Ny):
+                    for z in range(Nz):
+                        for (i, j, R), T in self.hopping_element.items():
+                            tx, ty, tz = x + R[0], y + R[1], z + R[2]
+                            if 0 <= tx < Nx and 0 <= ty < Ny and 0 <= tz < Nz:
+                                a = ((x * Ny + y) * Nz + z) * norb + i
+                                b = ((tx * Ny + ty) * Nz + tz) * norb + j
+                                H[a, b] += T
+
+        else:
+            raise ValueError("Only up to 3D supported for open BCs.")
+
+        # --- Add onsite energies ---
+        for c in range(total_cells):
+            base = c * norb
+            for i in range(norb):
+                H[base + i, base + i] += self.onsite_energies[i]
+
+        # Hermitize
+        H = 0.5 * (H + H.conj().T)
+        return H
+
+# --- Since TightBinding class is already defined ---
 
 
 a1 = np.array([1, 0])
@@ -116,37 +184,17 @@ orbital_positions = [
 ]
 
 tb = TightBindingModel(lattice_vec=lattice, lattice_orb=orbital_positions)
-t = -2.7
+t = -1
 tb.update_hopping_matrix(t, 0, 1, (0,0))
-tb.update_hopping_matrix(t, 0, 1, (-1,0))
-tb.update_hopping_matrix(t, 0, 1, (0,-1))
+tb.update_hopping_matrix(t, 0, 1, (1,0))
+tb.update_hopping_matrix(t, 0, 1, (0,1))
 
-for name, kred in [("K1",[1/3,1/3]), ("K2",[-1/3,2/3]), ("Gamma",[0,0]), ("M",[0.5,0])]:
+pts = {"Γ": [0, 0], "K1": [1/3, 2/3], "K2": [-1/3, -2/3], "M": [0.5, 0.0]}
+path = ["Γ", "K1", "K2", "Γ"]
+
+for name, kred in [("K1",[1/3,2/3]), ("K2",[-1/3,-2/3]), ("Gamma",[0,0]), ("M",[0,1/3])]:
     Hk = tb.H_k(kred)
     print(name, " f=", np.round(Hk[0,1],9), " eigs=", np.round(np.linalg.eigvalsh(Hk),9))
 
-"""
-     def energies_from_klist(self, klist):
 
-    def energies_from_afew_k(self, klist):
-
-    def plot_bandstructure(self, hamiltonian, k_val):
-        return 0
-    
-
-    
-    #---------------------------------------------------------------------------------------------------------------#
-    #If we have an open system for our lattice we will use real-space Hamiltonians
-    def H_ij(self, [nsites]):
-        Htot = zeros((product(nsites)*self.norb, product(nsites)*self.norb), dtype=complex)
-        return 0
-
-    def edge_states(self):
-        return 0
-    
-    
-class TB_diaginfullBZ(TightBindingModel)
-
-    def calculate_density_of_state(self):
-        return 0
-"""
+tb.plot_bandstructure(pts, path, 50)
