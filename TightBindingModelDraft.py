@@ -275,35 +275,3 @@ class TightBindingModel:
             return chern_number, F
         
         return chern_number
-
-#---------------------------------------------------------------------------------------------------------------------------#
-#---------------------------------------------------------------------------------------------------------------------------#
-# --- Since TightBinding class is already defined --- #
-#---------------------------------------------------------------------------------------------------------------------------#
-#---------------------------------------------------------------------------------------------------------------------------#
-
-a1 = np.array([1, 0])
-a2 = np.array([1/2, np.sqrt(3)/2])
-lattice = np.array([a1, a2])            # rows = a1, a2  (NO transpose)
-
-orbital_positions = [
-    [0.0, 0.0],   # A
-    [1/3, 1/3]    # B
-]
-
-tb = TightBindingModel(lattice_vec=lattice, lattice_orb=orbital_positions)
-t = 1
-tb.update_hopping_matrix(t, 0, 1, (0,0))
-tb.update_hopping_matrix(t, 0, 1, (1,0))
-tb.update_hopping_matrix(t, 0, 1, (0,1))
-
-pts = {"Γ": [0, 0], "K1": [1/3, 2/3], "K2": [-1/3, -2/3], "M": [0.5, 0.0]}
-path = ["Γ", "K1", "K2", "Γ"]
-
-for name, kred in [("K1",[1/3,2/3]), ("K2",[-1/3,-2/3]), ("Gamma",[0,0]), ("M",[0,1/3])]:
-    Hk = tb.H_k(kred)
-    print(name, " f=", np.round(Hk[0,1],9), " eigs=", np.round(np.linalg.eigvalsh(Hk),9))
-
-tb.plot_bandstructure(pts, path, 200)
-c_n = tb.chern_number_FHZ_method(80, 80, 1)
-print("Chern number is, ", c_n)
